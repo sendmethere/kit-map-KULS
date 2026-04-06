@@ -20,12 +20,13 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Home, Save, Package, Undo2, Redo2, LayoutDashboard, Trash2, Database } from 'lucide-react'
+import { Home, Save, Package, Undo2, Redo2, LayoutDashboard, Trash2, Database, BookOpen } from 'lucide-react'
 import useMapStore, { MAX_NODES, MAX_EDGES } from '@/store/useMapStore'
 import ConceptNode from './ConceptNode'
 import NodeEditor from './NodeEditor'
 import KitGenerator from './KitGenerator'
 import { getLayoutedElements } from '@/utils/layout'
+import SAMPLES from '@/utils/samples'
 
 const nodeTypes = { concept: ConceptNode }
 
@@ -51,6 +52,7 @@ export default function TeacherMode({ onHome, onKitActivated }) {
   const [edgeDialog, setEdgeDialog] = useState({ open: false, label: '' })
   const [pendingConnection, setPendingConnection] = useState(null)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [showSamples, setShowSamples] = useState(false)
 
   // Sync to store when nodes/edges change — respect limits
   useEffect(() => {
@@ -193,6 +195,13 @@ export default function TeacherMode({ onHome, onKitActivated }) {
     setShowClearConfirm(false)
   }
 
+  const handleLoadSample = (sample) => {
+    pushSnap()
+    setNodes(sample.nodes)
+    setEdges(sample.edges)
+    setShowSamples(false)
+  }
+
   const handleAutoLayout = () => {
     pushSnap()
     const { nodes: ln, edges: le } = getLayoutedElements(nodes, edges)
@@ -232,6 +241,21 @@ export default function TeacherMode({ onHome, onKitActivated }) {
           </div>
 
           <div className="flex-1" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowSamples(true)}
+                aria-label="샘플 지도 불러오기"
+              >
+                <BookOpen className="w-4 h-4 mr-1" />
+                샘플 불러오기
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>과학·사회·정보 교과 샘플 지도를 불러옵니다</TooltipContent>
+          </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>
@@ -446,6 +470,47 @@ export default function TeacherMode({ onHome, onKitActivated }) {
             </p>
             <DialogFooter>
               <Button onClick={() => setLimitAlert(null)}>확인</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 샘플 선택 */}
+        <Dialog open={showSamples} onOpenChange={setShowSamples}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>교과 샘플 지도 불러오기</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-gray-500 -mt-2">
+              샘플을 선택하면 현재 캔버스에 불러옵니다. 기존 작업은 실행 취소로 복원할 수 있습니다.
+            </p>
+            <div className="grid grid-cols-3 gap-4 my-2">
+              {SAMPLES.map((sample) => (
+                <button
+                  key={sample.id}
+                  onClick={() => handleLoadSample(sample)}
+                  style={{ borderColor: sample.borderColor, background: sample.bgColor }}
+                  className="flex flex-col gap-2 rounded-xl border-2 p-4 text-left transition-all hover:shadow-md hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-offset-2"
+                  aria-label={`${sample.subject} 샘플 불러오기: ${sample.title}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      style={{ background: sample.color }}
+                      className="text-white text-xs font-bold px-2 py-0.5 rounded-full"
+                    >
+                      {sample.subject}
+                    </span>
+                  </div>
+                  <p className="font-bold text-gray-800 text-sm leading-tight">{sample.title}</p>
+                  <p className="text-xs text-gray-500 leading-relaxed">{sample.description}</p>
+                  <div className="flex gap-3 mt-1 text-xs text-gray-400">
+                    <span>노드 {sample.nodeCount}개</span>
+                    <span>관계 {sample.edgeCount}개</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowSamples(false)}>취소</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
