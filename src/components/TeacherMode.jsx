@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   ReactFlow,
   Background,
@@ -20,8 +20,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Home, Save, Package, Undo2, Redo2, LayoutDashboard, Trash2 } from 'lucide-react'
-import useMapStore from '@/store/useMapStore'
+import { Home, Save, Package, Undo2, Redo2, LayoutDashboard, Trash2, Database } from 'lucide-react'
+import useMapStore, { MAX_NODES, MAX_EDGES } from '@/store/useMapStore'
 import ConceptNode from './ConceptNode'
 import NodeEditor from './NodeEditor'
 import KitGenerator from './KitGenerator'
@@ -36,7 +36,7 @@ export default function TeacherMode({ onHome, onKitActivated }) {
   const {
     teacherNodes, teacherEdges,
     setTeacherNodes, setTeacherEdges,
-    saveTeacherMap,
+    saveTeacherMap, clearTeacherMap,
     pushHistory, undo, redo,
   } = useMapStore()
 
@@ -44,17 +44,22 @@ export default function TeacherMode({ onHome, onKitActivated }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState(teacherEdges)
   const [selectedNode, setSelectedNode] = useState(null)
   const [showKitPanel, setShowKitPanel] = useState(false)
+  const [limitAlert, setLimitAlert] = useState(null) // 'node' | 'edge' | null
 
   // Dialog states
   const [nodeDialog, setNodeDialog] = useState({ open: false, label: '' })
-  const [edgeDialog, setEdgeDialog] = useState({ open: false, label: '', connection: null })
+  const [edgeDialog, setEdgeDialog] = useState({ open: false, label: '' })
   const [pendingConnection, setPendingConnection] = useState(null)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
 
-  // Sync to store when nodes/edges change
+  // Sync to store when nodes/edges change — respect limits
   useEffect(() => {
     setTeacherNodes(nodes)
+  }, [nodes])
+
+  useEffect(() => {
     setTeacherEdges(edges)
-  }, [nodes, edges])
+  }, [edges])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -79,25 +84,31 @@ export default function TeacherMode({ onHome, onKitActivated }) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedNode, undo, redo])
+  }, [selectedNode])
 
   const pushSnap = () => {
     pushHistory({ teacherNodes: nodes, teacherEdges: edges })
   }
 
-  const handlePaneClick = useCallback(
-    (e) => {
-      if (e.target.classList.contains('react-flow__pane')) {
-        setNodeDialog({ open: true, label: '', clickPos: { x: e.clientX, y: e.clientY } })
+  const handlePaneClick = useCallback((e) => {
+    if (e.target.classList.contains('react-flow__pane')) {
+      if (nodes.length >= MAX_NODES) {
+        setLimitAlert('node')
+        return
       }
-      setSelectedNode(null)
-    },
-    []
-  )
+      setNodeDialog({ open: true, label: '', clickPos: { x: e.clientX, y: e.clientY } })
+    }
+    setSelectedNode(null)
+  }, [nodes.length])
 
   const handleAddNode = () => {
     if (!nodeDialog.label.trim()) {
       setNodeDialog({ open: false, label: '' })
+      return
+    }
+    if (nodes.length >= MAX_NODES) {
+      setNodeDialog({ open: false, label: '' })
+      setLimitAlert('node')
       return
     }
     pushSnap()
@@ -119,16 +130,19 @@ export default function TeacherMode({ onHome, onKitActivated }) {
     setNodeDialog({ open: false, label: '' })
   }
 
-  const handleConnect = useCallback(
-    (connection) => {
-      setPendingConnection(connection)
-      setEdgeDialog({ open: true, label: '' })
-    },
-    []
-  )
+  const handleConnect = useCallback((connection) => {
+    setPendingConnection(connection)
+    setEdgeDialog({ open: true, label: '' })
+  }, [])
 
   const handleAddEdge = () => {
     if (!pendingConnection) return
+    if (edges.length >= MAX_EDGES) {
+      setEdgeDialog({ open: false, label: '' })
+      setPendingConnection(null)
+      setLimitAlert('edge')
+      return
+    }
     pushSnap()
     const newEdge = {
       ...pendingConnection,
@@ -146,21 +160,14 @@ export default function TeacherMode({ onHome, onKitActivated }) {
     setPendingConnection(null)
   }
 
-  const handleNodeClick = (_, node) => {
-    setSelectedNode(node)
-  }
-
-  const handleNodeDoubleClick = (_, node) => {
-    setSelectedNode(node)
-  }
+  const handleNodeClick = (_, node) => setSelectedNode(node)
+  const handleNodeDoubleClick = (_, node) => setSelectedNode(node)
 
   const handleUpdateNode = (id, updates) => {
     pushSnap()
     setNodes((nds) =>
       nds.map((n) =>
-        n.id === id
-          ? { ...n, data: { ...n.data, label: updates.label, color: updates.color } }
-          : n
+        n.id === id ? { ...n, data: { ...n.data, label: updates.label, color: updates.color } } : n
       )
     )
     setSelectedNode(null)
@@ -178,6 +185,14 @@ export default function TeacherMode({ onHome, onKitActivated }) {
     alert('개념 지도가 저장되었습니다.')
   }
 
+  const handleClear = () => {
+    clearTeacherMap()
+    setNodes([])
+    setEdges([])
+    setSelectedNode(null)
+    setShowClearConfirm(false)
+  }
+
   const handleAutoLayout = () => {
     pushSnap()
     const { nodes: ln, edges: le } = getLayoutedElements(nodes, edges)
@@ -185,9 +200,8 @@ export default function TeacherMode({ onHome, onKitActivated }) {
     setEdges(le)
   }
 
-  const handleDeleteSelected = () => {
-    if (selectedNode) handleDeleteNode(selectedNode.id)
-  }
+  const nodeCount = nodes.length
+  const edgeCount = edges.length
 
   return (
     <TooltipProvider>
@@ -204,7 +218,35 @@ export default function TeacherMode({ onHome, onKitActivated }) {
           </Tooltip>
 
           <span className="font-bold text-orange-600 text-lg">교사 모드</span>
+
+          {/* 저장 현황 표시 */}
+          <div className="flex items-center gap-1 ml-2 px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-500">
+            <Database className="w-3 h-3" />
+            <span>
+              노드 <span className={nodeCount >= MAX_NODES ? 'text-red-500 font-bold' : 'text-gray-700 font-medium'}>{nodeCount}/{MAX_NODES}</span>
+            </span>
+            <span className="mx-1">·</span>
+            <span>
+              관계 <span className={edgeCount >= MAX_EDGES ? 'text-red-500 font-bold' : 'text-gray-700 font-medium'}>{edgeCount}/{MAX_EDGES}</span>
+            </span>
+          </div>
+
           <div className="flex-1" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowClearConfirm(true)}
+                className="text-red-500 border-red-200 hover:bg-red-50"
+                aria-label="저장된 지도 초기화"
+              >
+                초기화
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>저장된 지도를 모두 지웁니다</TooltipContent>
+          </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>
@@ -213,7 +255,7 @@ export default function TeacherMode({ onHome, onKitActivated }) {
                 개념 지도 저장
               </Button>
             </TooltipTrigger>
-            <TooltipContent>현재 지도를 저장합니다</TooltipContent>
+            <TooltipContent>현재 지도를 localStorage에 저장합니다</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -234,7 +276,6 @@ export default function TeacherMode({ onHome, onKitActivated }) {
 
         {/* Main Area */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Canvas */}
           <div className="flex-1 relative">
             <ReactFlow
               nodes={nodes}
@@ -254,13 +295,19 @@ export default function TeacherMode({ onHome, onKitActivated }) {
               <MiniMap nodeColor={(n) => n.data?.color || '#F97316'} />
             </ReactFlow>
 
+            {/* 빈 캔버스 안내 */}
+            {nodes.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <p className="text-gray-400 text-sm">빈 캔버스를 클릭하여 개념 노드를 추가하세요</p>
+              </div>
+            )}
+
             {/* Bottom Toolbar */}
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-white rounded-xl shadow-md px-4 py-2 border border-gray-200">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    variant="ghost"
-                    size="sm"
+                    variant="ghost" size="sm"
                     onClick={() => {
                       undo()
                       const s = useMapStore.getState()
@@ -269,8 +316,7 @@ export default function TeacherMode({ onHome, onKitActivated }) {
                     }}
                     aria-label="실행 취소"
                   >
-                    <Undo2 className="w-4 h-4 mr-1" />
-                    실행 취소
+                    <Undo2 className="w-4 h-4 mr-1" />실행 취소
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Ctrl+Z</TooltipContent>
@@ -279,8 +325,7 @@ export default function TeacherMode({ onHome, onKitActivated }) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    variant="ghost"
-                    size="sm"
+                    variant="ghost" size="sm"
                     onClick={() => {
                       redo()
                       const s = useMapStore.getState()
@@ -289,8 +334,7 @@ export default function TeacherMode({ onHome, onKitActivated }) {
                     }}
                     aria-label="다시 실행"
                   >
-                    <Redo2 className="w-4 h-4 mr-1" />
-                    다시 실행
+                    <Redo2 className="w-4 h-4 mr-1" />다시 실행
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Ctrl+Y</TooltipContent>
@@ -301,8 +345,7 @@ export default function TeacherMode({ onHome, onKitActivated }) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="sm" onClick={handleAutoLayout} aria-label="자동 정렬">
-                    <LayoutDashboard className="w-4 h-4 mr-1" />
-                    자동 정렬
+                    <LayoutDashboard className="w-4 h-4 mr-1" />자동 정렬
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>노드를 자동으로 정렬합니다</TooltipContent>
@@ -314,14 +357,12 @@ export default function TeacherMode({ onHome, onKitActivated }) {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleDeleteSelected}
+                        variant="ghost" size="sm"
+                        onClick={() => handleDeleteNode(selectedNode.id)}
                         className="text-red-500 hover:text-red-700"
                         aria-label="선택된 노드 삭제"
                       >
-                        <Trash2 className="w-4 h-4 mr-1" />
-                        삭제
+                        <Trash2 className="w-4 h-4 mr-1" />삭제
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>Delete 키로도 삭제 가능합니다</TooltipContent>
@@ -341,14 +382,13 @@ export default function TeacherMode({ onHome, onKitActivated }) {
             />
           )}
           {showKitPanel && (
-            <KitGenerator
-              onClose={() => setShowKitPanel(false)}
-              onActivate={onKitActivated}
-            />
+            <KitGenerator onClose={() => setShowKitPanel(false)} onActivate={onKitActivated} />
           )}
         </div>
 
-        {/* Node Label Dialog */}
+        {/* ── Dialogs ── */}
+
+        {/* 개념 노드 추가 */}
         <Dialog open={nodeDialog.open} onOpenChange={(open) => !open && setNodeDialog({ open: false, label: '' })}>
           <DialogContent>
             <DialogHeader>
@@ -363,17 +403,13 @@ export default function TeacherMode({ onHome, onKitActivated }) {
               aria-label="개념 이름 입력"
             />
             <DialogFooter>
-              <Button variant="outline" onClick={() => setNodeDialog({ open: false, label: '' })}>
-                취소
-              </Button>
-              <Button onClick={handleAddNode} aria-label="노드 추가 확인">
-                추가
-              </Button>
+              <Button variant="outline" onClick={() => setNodeDialog({ open: false, label: '' })}>취소</Button>
+              <Button onClick={handleAddNode} aria-label="노드 추가 확인">추가</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Edge Label Dialog */}
+        {/* 관계 이름 입력 */}
         <Dialog open={edgeDialog.open} onOpenChange={(open) => !open && setEdgeDialog({ open: false, label: '' })}>
           <DialogContent>
             <DialogHeader>
@@ -388,18 +424,44 @@ export default function TeacherMode({ onHome, onKitActivated }) {
               aria-label="관계 이름 입력"
             />
             <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setEdgeDialog({ open: false, label: '' })
-                  setPendingConnection(null)
-                }}
-              >
-                취소
-              </Button>
-              <Button onClick={handleAddEdge} aria-label="관계 추가 확인">
-                추가
-              </Button>
+              <Button variant="outline" onClick={() => { setEdgeDialog({ open: false, label: '' }); setPendingConnection(null) }}>취소</Button>
+              <Button onClick={handleAddEdge} aria-label="관계 추가 확인">추가</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 한도 초과 경고 */}
+        <Dialog open={!!limitAlert} onOpenChange={() => setLimitAlert(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>한도 초과</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-gray-600">
+              {limitAlert === 'node'
+                ? `개념 노드는 최대 ${MAX_NODES}개까지 추가할 수 있습니다.`
+                : `관계(엣지)는 최대 ${MAX_EDGES}개까지 추가할 수 있습니다.`}
+            </p>
+            <p className="text-xs text-gray-400 mt-1">
+              일부 노드나 관계를 삭제한 후 다시 시도해 주세요.
+            </p>
+            <DialogFooter>
+              <Button onClick={() => setLimitAlert(null)}>확인</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 초기화 확인 */}
+        <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>지도 초기화</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-gray-600">
+              저장된 모든 노드와 관계가 삭제됩니다. 계속하시겠습니까?
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowClearConfirm(false)}>취소</Button>
+              <Button variant="destructive" onClick={handleClear} aria-label="지도 초기화 확인">초기화</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
